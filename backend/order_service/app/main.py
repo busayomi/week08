@@ -353,7 +353,7 @@ async def update_order_status(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not update order status.",
+            detail="Could not update your order status.",
         )
 
 
