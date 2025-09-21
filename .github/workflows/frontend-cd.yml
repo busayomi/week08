@@ -47,6 +47,9 @@ jobs:
   deploy_frontend:
     runs-on: ubuntu-latest
     environment: Production
+    
+    outputs:
+      FRONTEND_IP: ${{ steps.get_frontend_ip.outputs.external_ip }}
 
     steps:
       - name: Checkout repository
@@ -92,24 +95,33 @@ jobs:
           cd k8s/
           # Ensure frontend-service.yaml is configured with your ACR
           kubectl apply -f frontend.yaml
-      - name: Get Frontend Service External IP
+
+      - name: Wait for Frontend LoadBalancer IP
         run: |
-          echo "Fetching external IP for frontend..."
+          echo "Waiting for Frontend LoadBalancer IP to be assigned (up to 5 minutes)..."
           FRONTEND_IP=""
-          for i in {1..30}; do
-            FRONTEND_IP=$(kubectl get svc frontend-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-            if [ -n "$FRONTEND_IP" ]; then
-              echo "Frontend External IP: $FRONTEND_IP"
-              echo "FRONTEND_IP=$FRONTEND_IP" >> $GITHUB_ENV
+          
+          for i in $(seq 1 60); do
+            echo "Attempt $i/60 to get IP..."
+            FRONTEND_IP=$(kubectl get service frontend-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$FRONTEND_IP" ]]; then
+              echo "Frontend LoadBalancer IP assigned!"
+              echo "Frontend Service IP: $FRONTEND_IP"
               break
             fi
-            echo "Still waiting for frontend external IP..."
-            sleep 10
+            sleep 5
           done
-          if [ -z "$FRONTEND_IP" ]; then
-            echo "Error: Frontend external IP not assigned."
+
+          if [[ -z "$FRONTEND_IP" ]]; then
+            echo "Error: Frontend LoadBalancer IP not assigned after timeout."
             exit 1
           fi
+
+          echo "FRONTEND_IP=$FRONTEND_IP" >> $GITHUB_ENV
+
+      - name: Capture Frontend Service IP for Workflow Output
+        id: get_frontend_ip
+        run: echo "external_ip=${{ env.FRONTEND_IP }}" >> $GITHUB_OUTPUT
 
       - name: Logout from Azure (AKS deployment)
         run: az logout
