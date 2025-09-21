@@ -6,15 +6,15 @@ on:
       aks_cluster_name:
         description: 'Name of the AKS Cluster to deploy to'
         required: true
-        default: ${{ secrets.AKS_CLUSTER_NAME }}
+        default: 'wk8busayo-aks'
       aks_resource_group:
         description: 'Resource Group of the AKS Cluster'
         required: true
-        default: ${{ secrets.AKS_RESOURCE_GROUP }}
+        default: 'wk8busayo-rg'
       aks_acr_name:
         description: 'Name of ACR'
         required: true
-        default: ${{ secrets.ACR_NAME }}
+        default: 'wk8busayoacr'
 
 jobs:
   deploy_backend:
