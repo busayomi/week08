@@ -8,7 +8,7 @@ on:
   workflow_dispatch:              
 
 env:
-  ACR_LOGIN_SERVER: "${{ secrets.AZURE_CONTAINER_REGISTRY }}.azurecr.io"
+  ACR_LOGIN_SERVER: "${{ secrets.AZURE_CONTAINER_REGISTRY }}"
   IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
 
 jobs:
@@ -111,7 +111,7 @@ jobs:
         run: az aks get-credentials --resource-group ${{ secrets.AKS_RG }} --name ${{ secrets.AKS_CLUSTER }} --overwrite-existing
 
       - name: Attach ACR to AKS
-        run: az aks update --name ${{ secrets.AKS_CLUSTER }} --resource-group ${{ secrets.AKS_RG }} --attach-acr ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+        run: az aks update --name ${{ secrets.AKS_CLUSTER }} --resource-group ${{ secrets.AKS_RG }} --attach-acr ${{ secrets.ACR_NAME }}
 
       - name: Deploy Backend Infrastructure
         run: |
