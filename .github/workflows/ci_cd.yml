@@ -56,7 +56,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 3. Backend CI: Install deps & Run Tests
+      # 3. Backend CI: Install deps & Run Tests ...
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
