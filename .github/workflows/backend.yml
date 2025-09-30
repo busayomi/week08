@@ -1,20 +1,39 @@
-name: Full CI/CD - Backend & Frontend
+name: Backend CI/CD
 
 on:
-  push:
-    branches: [main]             
-  pull_request:
-    branches: [development]       
-  workflow_dispatch:              
+  workflow_call:                
+    inputs:
+      aks_cluster_name:
+        required: true
+        type: string
+      aks_resource_group:
+        required: true
+        type: string
+      aks_acr_name:
+        required: true
+        type: string
+  workflow_dispatch:            
+    inputs:
+      aks_cluster_name:
+        required: true
+        default: 'wk8busayo-aks'
+      aks_resource_group:
+        required: true
+        default: 'wk8busayo-rg'
+      aks_acr_name:
+        required: true
+        default: 'wk8busayoacr'
 
 env:
   ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
   IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
 
 jobs:
-  build_and_deploy:
+  backend_full:
     runs-on: ubuntu-latest
-    environment: Production
+    outputs:
+      product_ip: ${{ steps.set_outputs.outputs.product_ip }}
+      order_ip: ${{ steps.set_outputs.outputs.order_ip }}
 
     services:
       product_db:
@@ -30,7 +49,6 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-
       order_db:
         image: postgres:15
         env:
@@ -46,17 +64,9 @@ jobs:
           - 5433:5432
 
     steps:
-      # 1. Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Login to Azure
-      - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      # 3. Backend CI: Install deps & Run Tests ...
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
@@ -65,10 +75,7 @@ jobs:
       - name: Install backend dependencies
         run: |
           pip install --upgrade pip
-          for req in backend/*/requirements.txt; do
-            echo "Installing $req"
-            pip install -r "$req"
-          done
+          for req in backend/*/requirements.txt; do pip install -r "$req"; done
           pip install pytest httpx
 
       - name: Run product_service tests
@@ -91,8 +98,12 @@ jobs:
           POSTGRES_PASSWORD: postgres
         run: pytest tests --maxfail=1 --disable-warnings -q
 
-      # 4. Backend CI: Build & Push Images
-      - name: Login to Azure Container Registry
+      - name: Azure Login (for build/push & deploy)
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
         run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
 
       - name: Build & Push Product Service Image
@@ -105,39 +116,36 @@ jobs:
           docker build -t ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }} ./backend/order_service
           docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
 
-
-      # 5. Backend CD: Deploy Backend Services
-      - name: Get AKS Credentials
-        run: az aks get-credentials --resource-group ${{ secrets.AKS_RG }} --name ${{ secrets.AKS_CLUSTER }} --overwrite-existing
+      - name: Get AKS credentials
+        run: az aks get-credentials --resource-group ${{ inputs.aks_resource_group }} --name ${{ inputs.aks_cluster_name }} --overwrite-existing
 
       - name: Attach ACR to AKS
-        run: az aks update --name ${{ secrets.AKS_CLUSTER }} --resource-group ${{ secrets.AKS_RG }} --attach-acr ${{ secrets.ACR_NAME }}
+        run: az aks update --name ${{ inputs.aks_cluster_name }} --resource-group ${{ inputs.aks_resource_group }} --attach-acr ${{ inputs.aks_acr_name }}
 
-      - name: Deploy Backend Infrastructure
+      - name: Deploy backend infra and services
         run: |
-          kubectl apply -f k8s/configmaps.yaml
-          kubectl apply -f k8s/secrets.yaml
-          kubectl apply -f k8s/product-db.yaml
-          kubectl apply -f k8s/order-db.yaml
+          cd k8s
+          kubectl apply -f configmaps.yaml
+          kubectl apply -f secrets.yaml
+          kubectl apply -f product-db.yaml
+          kubectl apply -f order-db.yaml
+          kubectl apply -f product-service.yaml
+          kubectl apply -f order-service.yaml
 
-      - name: Deploy Backend Microservices
+      - name: Wait and capture backend IPs
+        id: set_outputs
         run: |
-          kubectl apply -f k8s/product-service.yaml
-          kubectl apply -f k8s/order-service.yaml
-
-      # 6. Capture Backend IPs
-      - name: Wait for Backend LoadBalancer IPs
-        id: capture_backend_ips
-        run: |
-          echo "Waiting for Product and Order service IPs..."
+          echo "Waiting for Product & Order IPs..."
+          PRODUCT_IP=""
+          ORDER_IP=""
           for i in {1..60}; do
-            PRODUCT_IP=$(kubectl get svc product-service-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-            ORDER_IP=$(kubectl get svc order-service-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            PRODUCT_IP=$(kubectl get svc product-service-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            ORDER_IP=$(kubectl get svc order-service-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
             if [[ -n "$PRODUCT_IP" && -n "$ORDER_IP" ]]; then
-              echo "Product Service IP: $PRODUCT_IP"
-              echo "Order Service IP: $ORDER_IP"
               echo "PRODUCT_IP=$PRODUCT_IP" >> $GITHUB_ENV
               echo "ORDER_IP=$ORDER_IP" >> $GITHUB_ENV
+              echo "::set-output name=product_ip::$PRODUCT_IP"
+              echo "::set-output name=order_ip::$ORDER_IP"
               break
             fi
             sleep 5
@@ -147,25 +155,6 @@ jobs:
             exit 1
           fi
 
-      # 7. Inject Backend IPs into Frontend
-      - name: Inject Backend IPs into Frontend main.js
-        run: |
-          sed -i "s|_PRODUCT_API_URL_|${{ env.PRODUCT_IP }}|g" frontend/main.js
-          sed -i "s|_ORDER_API_URL_|${{ env.ORDER_IP }}|g" frontend/main.js
-          echo "--- Modified main.js ---"
-          cat frontend/main.js
-
-      # 8. Frontend CI: Build & Push Images & Deploy
-      - name: Build & Push Frontend Image
-        run: |
-          docker build -t ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }} ./frontend
-          docker push ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }}
-
-      # 9. Frontend CD: Deploy Frontend
-      - name: Deploy Frontend to AKS
-        run: kubectl apply -f k8s/frontend.yaml
-
-      # 10. Logout from Azure
       - name: Logout from Azure
         run: az logout
         if: always()

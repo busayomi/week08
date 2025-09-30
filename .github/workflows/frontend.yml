@@ -1,0 +1,76 @@
+name: Frontend CI/CD (caller)
+
+on:
+  workflow_dispatch:            
+    inputs:
+      aks_cluster_name:
+        required: true
+        default: 'wk8busayo-aks'
+      aks_resource_group:
+        required: true
+        default: 'wk8busayo-rg'
+      aks_acr_name:
+        required: true
+        default: 'wk8busayoacr'
+
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend.yml'
+
+env:
+  ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+  IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
+
+jobs:
+  call_backend:
+    name: Call backend reusable workflow
+    uses: ./.github/workflows/backend.yml
+    with:
+      aks_cluster_name: ${{ github.event.inputs.aks_cluster_name || secrets.AKS_CLUSTER }}
+      aks_resource_group: ${{ github.event.inputs.aks_resource_group || secrets.AKS_RG }}
+      aks_acr_name: ${{ github.event.inputs.aks_acr_name || secrets.AZURE_CONTAINER_REGISTRY }}
+
+  frontend_build_and_deploy:
+    needs: call_backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get backend IPs from backend job outputs
+        run: |
+          echo "Product IP from backend job: ${{ needs.call_backend.outputs.product_ip }}"
+          echo "Order IP from backend job: ${{ needs.call_backend.outputs.order_ip }}"
+
+      - name: Inject backend IPs into frontend/main.js
+        run: |
+          sed -i "s|_PRODUCT_API_URL_|${{ needs.call_backend.outputs.product_ip }}|g" frontend/main.js
+          sed -i "s|_ORDER_API_URL_|${{ needs.call_backend.outputs.order_ip }}|g" frontend/main.js
+          cat frontend/main.js
+
+      - name: Azure Login (for build/push & deploy)
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
+
+      - name: Build & Push Frontend Image
+        run: |
+          docker build -t ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }} ./frontend
+          docker push ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }}
+
+      - name: Get AKS credentials
+        run: az aks get-credentials --resource-group ${{ github.event.inputs.aks_resource_group || secrets.AKS_RG }} --name ${{ github.event.inputs.aks_cluster_name || secrets.AKS_CLUSTER }} --overwrite-existing
+
+      - name: Deploy Frontend
+        run: |
+          kubectl apply -f k8s/frontend.yaml
+
+      - name: Logout from Azure
+        run: az logout
+        if: always()
