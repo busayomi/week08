@@ -42,8 +42,6 @@ jobs:
     env:
       ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
       IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
-      AKS_RG: ${{ github.event.inputs.aks_resource_group || vars.AKS_RG || secrets.AKS_RG }}
-      AKS_CLUSTER: ${{ github.event.inputs.aks_cluster_name || vars.AKS_CLUSTER || secrets.AKS_CLUSTER }}
 
     steps:
       - name: Checkout repository
@@ -65,13 +63,6 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Validate AKS configuration
-        run: |
-          if [ -z "$AKS_RG" ] || [ -z "$AKS_CLUSTER" ]; then
-            echo "AKS_RG/AKS_CLUSTER not set. Set repo variables (AKS_RG, AKS_CLUSTER) or supply workflow_dispatch inputs." >&2
-            exit 1
-          fi
-
       - name: Login to ACR
         run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
 
@@ -81,7 +72,7 @@ jobs:
           docker push ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }}
 
       - name: Get AKS credentials
-        run: az aks get-credentials --resource-group "$AKS_RG" --name "$AKS_CLUSTER" --overwrite-existing
+        run: az aks get-credentials --resource-group ${{ github.event.inputs.aks_resource_group || vars.AKS_RG }} --name ${{ github.event.inputs.aks_cluster_name || vars.AKS_CLUSTER }} --overwrite-existing
 
       - name: Deploy Frontend
         run: |
