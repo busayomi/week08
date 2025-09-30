@@ -12,6 +12,18 @@ on:
       aks_acr_name:
         required: true
         type: string
+    secrets:
+      AZURE_CREDENTIALS:
+        required: true
+      AZURE_CONTAINER_REGISTRY:
+        required: true
+    outputs:
+      product_ip:
+        description: Product service IP
+        value: ${{ jobs.backend_full.outputs.product_ip }}
+      order_ip:
+        description: Order service IP
+        value: ${{ jobs.backend_full.outputs.order_ip }}
   workflow_dispatch:            
     inputs:
       aks_cluster_name:
@@ -144,8 +156,8 @@ jobs:
             if [[ -n "$PRODUCT_IP" && -n "$ORDER_IP" ]]; then
               echo "PRODUCT_IP=$PRODUCT_IP" >> $GITHUB_ENV
               echo "ORDER_IP=$ORDER_IP" >> $GITHUB_ENV
-              echo "::set-output name=product_ip::$PRODUCT_IP"
-              echo "::set-output name=order_ip::$ORDER_IP"
+              echo "product_ip=$PRODUCT_IP" >> "$GITHUB_OUTPUT"
+              echo "order_ip=$ORDER_IP" >> "$GITHUB_OUTPUT"
               break
             fi
             sleep 5

@@ -19,22 +19,24 @@ on:
       - 'frontend/**'
       - '.github/workflows/frontend.yml'
 
-env:
-  ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
-  IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
-
 jobs:
   call_backend:
     name: Call backend reusable workflow
     uses: ./.github/workflows/backend.yml
     with:
-      aks_cluster_name: ${{ secrets.AKS_CLUSTER }}
-      aks_resource_group: ${{ secrets.AKS_RG }}
-      aks_acr_name: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+      aks_cluster_name: ${{ github.event.inputs.aks_cluster_name || vars.AKS_CLUSTER }}
+      aks_resource_group: ${{ github.event.inputs.aks_resource_group || vars.AKS_RG }}
+      aks_acr_name: ${{ github.event.inputs.aks_acr_name || vars.ACR_NAME }}
+    secrets:
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+      AZURE_CONTAINER_REGISTRY: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
 
   frontend_build_and_deploy:
     needs: call_backend
     runs-on: ubuntu-latest
+    env:
+      ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+      IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
 
     steps:
       - name: Checkout repository
