@@ -25,11 +25,15 @@ on:
         required: true
         default: 'wk8busayo-rg'
   push:
-    branches: [main, development]
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend.yml'  
+  pull_request:
+    branches: [development]
     paths:
       - 'frontend/**'
       - '.github/workflows/frontend.yml'
-
 
 jobs:
   gate:
