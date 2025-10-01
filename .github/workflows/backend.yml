@@ -38,24 +38,6 @@ on:
       aks_acr_name:
         required: false
         default: 'wk8busayoacr'
-    outputs:
-      product_ip:
-        description: Product service IP
-        value: ${{ jobs.backend_deploy.outputs.product_ip }}
-      order_ip:
-        description: Order service IP
-        value: ${{ jobs.backend_deploy.outputs.order_ip }}
-  workflow_dispatch:            
-    inputs:
-      aks_cluster_name:
-        required: true
-        default: 'wk8busayo-aks'
-      aks_resource_group:
-        required: true
-        default: 'wk8busayo-rg'
-      aks_acr_name:
-        required: true
-        default: 'wk8busayoacr'
 
 env:
   ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
