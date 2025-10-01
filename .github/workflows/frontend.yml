@@ -91,6 +91,29 @@ jobs:
         run: |
           kubectl set image deploy/frontend frontend-container=${{ env.ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }}
 
+      - name: Wait for Frontend LoadBalancer IP
+        id: frontend_ip
+        run: |
+          echo "Waiting for frontend external IP..."
+          for i in {1..60}; do
+            IP=$(kubectl get svc frontend-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            if [ -z "$IP" ]; then
+              HOST=$(kubectl get svc frontend-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            fi
+            if [ -n "$IP" ] || [ -n "$HOST" ]; then
+              VAL=${IP:-$HOST}
+              echo "Frontend external address: $VAL"
+              echo "FRONTEND_ADDR=$VAL" >> "$GITHUB_ENV"
+              echo "addr=$VAL" >> "$GITHUB_OUTPUT"
+              echo "Frontend URL: http://$VAL"
+              echo "Frontend URL: http://$VAL" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Error: Frontend external address not assigned in time" >&2
+          exit 1
+
       - name: Logout from Azure
         run: az logout
         if: always()
