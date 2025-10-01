@@ -25,19 +25,36 @@ on:
 
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.set.outputs.should_deploy }}
+    steps:
+      - name: Decide if we should deploy
+        id: set
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ github.event_name }}" = "push" ]; then
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
   call_backend:
     name: Call backend reusable workflow
+    needs: gate
     uses: ./.github/workflows/backend.yml
     with:
       aks_cluster_name: ${{ github.event.inputs.aks_cluster_name || vars.AKS_CLUSTER }}
       aks_resource_group: ${{ github.event.inputs.aks_resource_group || vars.AKS_RG }}
       aks_acr_name: ${{ github.event.inputs.aks_acr_name || vars.ACR_NAME }}
+      deploy: ${{ needs.gate.outputs.should_deploy == 'true' }}
     secrets:
       AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
       AZURE_CONTAINER_REGISTRY: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
 
   frontend_build_and_deploy:
-    needs: call_backend
+    needs: [gate, call_backend]
+    if: ${{ needs.gate.outputs.should_deploy == 'true' }}
     runs-on: ubuntu-latest
     env:
       ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}

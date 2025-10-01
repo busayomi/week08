@@ -13,6 +13,10 @@ on:
       aks_acr_name:
         required: true
         type: string
+      deploy:
+        required: false
+        type: boolean
+        default: true
     secrets:
       AZURE_CREDENTIALS:
         required: true
@@ -21,10 +25,10 @@ on:
     outputs:
       product_ip:
         description: Product service IP
-        value: ${{ jobs.backend_full.outputs.product_ip }}
+        value: ${{ jobs.backend_deploy.outputs.product_ip }}
       order_ip:
         description: Order service IP
-        value: ${{ jobs.backend_full.outputs.order_ip }}
+        value: ${{ jobs.backend_deploy.outputs.order_ip }}
   workflow_dispatch:            
     inputs:
       aks_cluster_name:
@@ -42,12 +46,8 @@ env:
   IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
 
 jobs:
-  backend_full:
+  backend_tests:
     runs-on: ubuntu-latest
-    outputs:
-      product_ip: ${{ steps.set_outputs.outputs.product_ip }}
-      order_ip: ${{ steps.set_outputs.outputs.order_ip }}
-
     services:
       product_db:
         image: postgres:15
@@ -110,6 +110,17 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         run: pytest tests --maxfail=1 --disable-warnings -q
+
+  backend_deploy:
+    runs-on: ubuntu-latest
+    needs: backend_tests
+    if: ${{ inputs.deploy == true }}
+    outputs:
+      product_ip: ${{ steps.set_outputs.outputs.product_ip }}
+      order_ip: ${{ steps.set_outputs.outputs.order_ip }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Azure Login (for build/push & deploy)
         uses: azure/login@v1
