@@ -23,7 +23,12 @@ on:
       AZURE_CONTAINER_REGISTRY:
         required: true
   push:
-    branches: [main, development]
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    branches: [development]
     paths:
       - 'backend/**'
       - '.github/workflows/backend.yml'
