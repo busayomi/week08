@@ -1,0 +1,178 @@
+# week08/.github/workflows/backend.yml
+name: Backend CI/CD
+
+on:
+  workflow_call:                
+    inputs:
+      aks_cluster_name:
+        required: true
+        type: string
+      aks_resource_group:
+        required: true
+        type: string
+      aks_acr_name:
+        required: true
+        type: string
+    secrets:
+      AZURE_CREDENTIALS:
+        required: true
+      AZURE_CONTAINER_REGISTRY:
+        required: true
+    outputs:
+      product_ip:
+        description: Product service IP
+        value: ${{ jobs.backend_full.outputs.product_ip }}
+      order_ip:
+        description: Order service IP
+        value: ${{ jobs.backend_full.outputs.order_ip }}
+  workflow_dispatch:            
+    inputs:
+      aks_cluster_name:
+        required: true
+        default: 'wk8busayo-aks'
+      aks_resource_group:
+        required: true
+        default: 'wk8busayo-rg'
+      aks_acr_name:
+        required: true
+        default: 'wk8busayoacr'
+
+env:
+  ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+  IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
+
+jobs:
+  backend_full:
+    runs-on: ubuntu-latest
+    outputs:
+      product_ip: ${{ steps.set_outputs.outputs.product_ip }}
+      order_ip: ${{ steps.set_outputs.outputs.order_ip }}
+
+    services:
+      product_db:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: products
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      order_db:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: orders
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5433:5432
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install backend dependencies
+        run: |
+          pip install --upgrade pip
+          for req in backend/*/requirements.txt; do pip install -r "$req"; done
+          pip install pytest httpx
+
+      - name: Run product_service tests
+        working-directory: backend/product_service
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: products
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        run: pytest tests --maxfail=1 --disable-warnings -q
+
+      - name: Run order_service tests
+        working-directory: backend/order_service
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5433
+          POSTGRES_DB: orders
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        run: pytest tests --maxfail=1 --disable-warnings -q
+
+      - name: Azure Login (for build/push & deploy)
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
+
+      - name: Build & Push Product Service Image
+        run: |
+          docker build -t ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }} ./backend/product_service
+          docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
+
+      - name: Build & Push Order Service Image
+        run: |
+          docker build -t ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }} ./backend/order_service
+          docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
+
+      - name: Get AKS credentials
+        run: az aks get-credentials --resource-group ${{ inputs.aks_resource_group }} --name ${{ inputs.aks_cluster_name }} --overwrite-existing
+
+      - name: Attach ACR to AKS
+        run: az aks update --name ${{ inputs.aks_cluster_name }} --resource-group ${{ inputs.aks_resource_group }} --attach-acr ${{ inputs.aks_acr_name }}
+
+      - name: Deploy backend infra and services
+        run: |
+          cd k8s
+          kubectl apply -f configmaps.yaml
+          kubectl apply -f secrets.yaml
+          kubectl apply -f product-db.yaml
+          kubectl apply -f order-db.yaml
+          kubectl apply -f product-service.yaml
+          kubectl apply -f order-service.yaml
+
+      - name: Set backend images to CI tag
+        run: |
+          kubectl set image deploy/product-service-w08e1 product-service-container=${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
+          kubectl set image deploy/order-service-w08e1 order-service-container=${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
+
+      - name: Wait and capture backend IPs
+        id: set_outputs
+        run: |
+          echo "Waiting for Product & Order IPs..."
+          PRODUCT_IP=""
+          ORDER_IP=""
+          for i in {1..60}; do
+            PRODUCT_IP=$(kubectl get svc product-service-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            ORDER_IP=$(kubectl get svc order-service-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            if [[ -n "$PRODUCT_IP" && -n "$ORDER_IP" ]]; then
+              echo "PRODUCT_IP=$PRODUCT_IP" >> $GITHUB_ENV
+              echo "ORDER_IP=$ORDER_IP" >> $GITHUB_ENV
+              echo "product_ip=$PRODUCT_IP" >> "$GITHUB_OUTPUT"
+              echo "order_ip=$ORDER_IP" >> "$GITHUB_OUTPUT"
+              break
+            fi
+            sleep 5
+          done
+          if [[ -z "$PRODUCT_IP" || -z "$ORDER_IP" ]]; then
+            echo "Error: IPs not assigned"
+            exit 1
+          fi
+
+      - name: Logout from Azure
+        run: az logout
+        if: always()

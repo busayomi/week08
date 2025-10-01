@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
       - name: order-service-container
-        image: durgeshsamariya.azurecr.io/order_service:latest
+        image: wk8busayoacr.azurecr.io/order_service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -57,6 +57,6 @@ spec:
     app: order-service
   ports:
     - protocol: TCP
-      port: 8001
+      port: 8000
       targetPort: 8000
   type: LoadBalancer
