@@ -65,6 +65,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Azure Login (for build/push & deploy)
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Validate AKS configuration
+        run: |
+          if [ -z "$AKS_RG" ] || [ -z "$AKS_CLUSTER" ]; then
+            echo "AKS_RG/AKS_CLUSTER not set. Set repo variables (AKS_RG, AKS_CLUSTER) or supply workflow_dispatch inputs." >&2
+            exit 1
+          fi
+
       - name: Get AKS credentials
         run: az aks get-credentials --resource-group "$AKS_RG" --name "$AKS_CLUSTER" --overwrite-existing
 
@@ -94,18 +106,6 @@ jobs:
           sed -i "s|_PRODUCT_API_URL_|http://${PRODUCT_IP}:8000|g" frontend/main.js
           sed -i "s|_ORDER_API_URL_|http://${ORDER_IP}:8000|g" frontend/main.js
           cat frontend/main.js
-
-      - name: Azure Login (for build/push & deploy)
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Validate AKS configuration
-        run: |
-          if [ -z "$AKS_RG" ] || [ -z "$AKS_CLUSTER" ]; then
-            echo "AKS_RG/AKS_CLUSTER not set. Set repo variables (AKS_RG, AKS_CLUSTER) or supply workflow_dispatch inputs." >&2
-            exit 1
-          fi
 
       - name: Login to ACR
         run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
