@@ -145,6 +145,11 @@ jobs:
           kubectl apply -f product-service.yaml
           kubectl apply -f order-service.yaml
 
+      - name: Set backend images to CI tag
+        run: |
+          kubectl set image deploy/product-service-w08e1 product-service-container=${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
+          kubectl set image deploy/order-service-w08e1 order-service-container=${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
+
       - name: Wait and capture backend IPs
         id: set_outputs
         run: |
